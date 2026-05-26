@@ -111,14 +111,13 @@ class NeuronLayer:
                 if(source != target):
                     synaptice_weight = self.synaptic_weights[(source, target)]
                     boost = synaptice_weight.weight * source_signal
-                    pending_boost_signals[target] += boost
+                    pending_boost_signals[target] += boost * (1 - pending_boost_signals[target])
+                    pending_boost_signals[target] = min(pending_boost_signals[target], 1.0)
         
         for cluster_name, boosted_signal in pending_boost_signals.items():
             current_signal = self.clusters[cluster_name].current_signal
             new_signal = current_signal + (boosted_signal * (1 - current_signal))
             self.clusters[cluster_name].current_signal = min(new_signal, 1)
-
-
 
     def decay(self):
         for cluster in self.clusters.values():
