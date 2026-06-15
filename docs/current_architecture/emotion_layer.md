@@ -40,9 +40,9 @@ Based on **Plutchik's Wheel of Emotions**:
 ## Emotion Profiles (Current — Evidence Accumulation Based)
 
 Each base emotion is defined by an **emotion schema** consisting of three components:
-`core` - the primary appraisal required for the emotion to be psychologically plausible.
-`supporting` - appraisals that positively contribute to the emotion.
-`contradicting` - appraisals that suppress the emotion.
+- `core` - the primary appraisal required for the emotion to be psychologically plausible.
+- `supporting` - appraisals that positively contribute to the emotion.
+- `contradicting` - appraisals that suppress the emotion.
 
 **Example — Fear schema:**
 ```
