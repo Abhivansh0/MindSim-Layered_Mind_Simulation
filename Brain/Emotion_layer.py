@@ -1,4 +1,4 @@
-from config.emotions import NEURON_EMOTION_MAPPING, EMOTION_INTENSITY_ZONES, REGULATIONS, COMPOUNDING_RULES, EMOTION_PROFILES, CLUSTER_RANGES, PENALTIES
+from config.emotions import NEURON_EMOTION_MAPPING, EMOTION_INTENSITY_ZONES, REGULATIONS, COMPOUNDING_RULES, EMOTION_PROFILES, CLUSTER_RANGES, PENALTIES, EMOTION_SCHEMAS
 from Simulation.mind_state import MindState
 
 class EmotionLayer:
@@ -61,53 +61,90 @@ class EmotionLayer:
 
 ## MEMORY INFLUENCE PENDING
 
-    def membership(self, profile, value):
-        minimum, ideal, maximum = profile
+    # def membership(self, profile, value):
+    #     minimum, ideal, maximum = profile
 
-        ## RIGHT SHOULDER
-        if ideal == maximum:
+    #     ## RIGHT SHOULDER
+    #     if ideal == maximum:
 
-            if value < minimum:
-                return 0.0
-            elif value >= ideal:
-                return 1.0
-            else:
-                return (value - minimum) / (ideal - minimum)
+    #         if value < minimum:
+    #             return 0.0
+    #         elif value >= ideal:
+    #             return 1.0
+    #         else:
+    #             return (value - minimum) / (ideal - minimum)
         
-        ## NORMAL TRIANGLES
-        if value < minimum or value > maximum:
-            return 0.0
+    #     ## NORMAL TRIANGLES
+    #     if value < minimum or value > maximum:
+    #         return 0.0
         
-        if value == ideal:
-            return 1.0
-        elif value < ideal:
-            return (value - minimum) / (ideal - minimum)
+    #     if value == ideal:
+    #         return 1.0
+    #     elif value < ideal:
+    #         return (value - minimum) / (ideal - minimum)
         
-        return (maximum - value) / (maximum - ideal)
+    #     return (maximum - value) / (maximum - ideal)
     
+    
+    # def process_emotions(self):
+    #     activation_map = self.mind_state.activation_map
+    #     for emotion, strength in self.emotion_tanks.items():
+    #         count = 0
+    #         total_value = 0
+    #         total_penalties = 0
+    #         for cluster, data in self.FINAL_EMOTION_PROFILES[emotion].items():
+    #             profile = data
+    #             if(cluster in activation_map):
+    #                 count += 1
+    #                 value = activation_map[cluster]
+    #                 match_up = self.membership(profile=profile, value=value)
+    #                 total_value += match_up
+    #             else:
+    #                 label = EMOTION_PROFILES[emotion][cluster]
+    #                 penalty = PENALTIES[label]
+    #                 total_penalties += penalty
+    #         if count == 0:
+    #             target_value = 0
+    #         else:
+    #             target_value = max(0.0, min(1.0, (total_value / count) - total_penalties))
+    #         self.emotion_tanks[emotion] = target_value
+
     
     def process_emotions(self):
         activation_map = self.mind_state.activation_map
-        for emotion, strength in self.emotion_tanks.items():
-            count = 0
-            total_value = 0
-            total_penalties = 0
-            for cluster, data in self.FINAL_EMOTION_PROFILES[emotion].items():
-                profile = data
-                if(cluster in activation_map):
-                    count += 1
-                    value = activation_map[cluster]
-                    match_up = self.membership(profile=profile, value=value)
-                    total_value += match_up
-                else:
-                    label = EMOTION_PROFILES[emotion][cluster]
-                    penalty = PENALTIES[label]
-                    total_penalties += penalty
-            if count == 0:
-                target_value = 0
-            else:
-                target_value = max(0.0, min(1.0, (total_value / count) - total_penalties))
-            self.emotion_tanks[emotion] = target_value
+        for emotion in self.emotion_tanks.keys():
+            support_total = 0
+            contradict_total = 0
+
+            profile = EMOTION_SCHEMAS[emotion]
+            core_cluster = profile["core"]
+            supporting_clusters = profile["supporting"]
+            contradicting_clusters = profile["contradicting"]
+
+            supporting_len = len(supporting_clusters)
+            contradict_len = len(contradicting_clusters)
+
+            if core_cluster in activation_map:
+                core = activation_map[core_cluster]
+                support_total += core
+            
+            for support in supporting_clusters:
+                if support in activation_map:
+                    support_total += activation_map[support]
+            
+            for contradict in contradicting_clusters:
+                if contradict in activation_map:
+                    contradict_total += activation_map[contradict]
+            
+            supporting = support_total / (supporting_len + 1)
+            contradicting = contradict_total / contradict_len
+
+            signal_value = supporting * (1 - contradicting)
+            if core_cluster not in activation_map:
+                signal_value *= 0.5
+            
+            signal_value = max(0, min(signal_value, 1))
+            self.emotion_tanks[emotion] = signal_value
 
 
     def update_inertia(self):

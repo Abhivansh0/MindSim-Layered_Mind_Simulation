@@ -37,69 +37,100 @@ Based on **Plutchik's Wheel of Emotions**:
 
 ---
 
-## Emotion Profiles (Current — Range + Membership Based)
+## Emotion Profiles (Current — Evidence Accumulation Based)
 
-Each base emotion is defined by a cluster profile. Each cluster in the profile specifies a **required activation range** using a tuple of `(minimum, ideal, maximum)`.
+Each base emotion is defined by an **emotion schema** consisting of three components:
+`core` - the primary appraisal required for the emotion to be psychologically plausible.
+`supporting` - appraisals that positively contribute to the emotion.
+`contradicting` - appraisals that suppress the emotion.
 
-**Example — Fear profile:**
+**Example — Fear schema:**
 ```
 fear = {
-  threat:      HIGH         → (0.55, 0.65, 0.65)
-  novelty:     HIGH         → (0.55, 0.65, 0.65)
-  familiarity: LOW          → (0.25, 0.26, 1)
-  urgency:     HIGH         → (0.55, 0.65, 0.65)
-  discomfort:  MEDIUM_HIGH  → (0.50, 0.60, 1)
+  core:          threat
+  supporting:    [novelty, urgency, discomfort]
+  contradicting: [familiarity, reward] 
 }
 ```
 
-**Standard range tuples:**
-```
-LOW:         (0.25, 0.26, 1)
-MEDIUM:      (0.35, 0.45, 1)
-MEDIUM_HIGH: (0.50, 0.60, 1)
-HIGH:        (0.55, 0.65, 0.65)
-```
-
-> Note: `LOW`, `MEDIUM`, `MEDIUM_HIGH` use a **right-shoulder** shape (anything ≥ ideal returns 1.0, using observed max as the ideal ceiling). `HIGH` also uses a right-shoulder but with `ideal = observed_max_across_200_stimuli` rather than a theoretical 1.0.
+> Note: These schemas are intentionally minimal. The goal is to preserve psychological distinctiveness between emotions while allowing complex emotional states to emerge naturally.
 
 ---
 
 ## Process_Emotions
 
-1. Take `activation_map` from MindState.
-2. For each base emotion, iterate through its cluster profile.
-3. For each cluster **present** in the activation map: compute membership score.
-4. For each cluster from the profile **absent** in the activation map: compute penalty.
-5. Final emotion score:
-   ```
-   score = (sum of present cluster scores / count of present clusters) - total_penalties
-   ```
-6. Store computed scores into `target_emotion_tank`.
+`Process_Emotions` follows an **evidence accumulation architecture** rather than range-based profile matching.
+
+For each base emotion:
+
+### Step 1 — Collect Positive Evidence
+
+Positive evidence consists of:
+
+- The `core` appraisal (if active).
+- All active `supporting` appraisals.
+
+The `core` appraisal participates in the positive evidence pool rather than acting as a hard gate.
+
+```text
+support_total = core + active_supporting_clusters
+
+positive =
+support_total / (total_supporting_clusters + 1)
+```
+
+Missing supporting appraisals contribute `0`.
 
 ---
 
-## Membership Function
+### Step 2 — Collect Contradictory Evidence
 
-Determines how much a cluster's current signal contributes to a specific emotion range.
+Contradicting appraisals suppress the emotion signal.
 
-**Out of range:**
-```
-if value < minimum OR value > maximum → return 0
-```
-(No contribution. Contradictory penalty for inverse-range cases is planned but not yet implemented.)
-
-**Right shoulder** (used for LOW, MEDIUM, MEDIUM_HIGH ranges and HIGH):
-```
-if value >= ideal  → return 1.0
-if value < ideal   → return (value - minimum) / (ideal - minimum)
+```text
+contradicting = sum(active_contradicting_clusters) / total_contradicting_clusters
 ```
 
-**Normal triangle** (used for ranges that have a true peak, not a shoulder):
+Missing contradicting appraisals contribute `0`.
+
+---
+
+### Step 3 — Generate Emotion Signal
+
+The base emotion signal is generated using the accumulated evidence.
+
+```text
+emotion_signal = positive * (1 - contradicting)
 ```
-if value == ideal  → return 1.0
-if value < ideal   → return (value - minimum) / (ideal - minimum)
-if value > ideal   → return (maximum - value) / (maximum - ideal)
+
+Contradicting appraisals continuously suppress the emotion rather than completely blocking it.
+
+---
+
+### Step 4 — Apply Core Penalty
+
+If the `core` appraisal is absent from the `activation_map`, the emotion is considered psychologically implausible but not impossible.
+
+A soft penalty is applied.
+
+```text
+emotion_signal *= 0.5
 ```
+
+This is intentionally a **soft enforcement** rather than a hard requirement.
+
+---
+
+### Step 5 — Clamp Values
+
+```text
+emotion_signal = max(0, min(emotion_signal, 1))
+```
+
+The final value is stored inside `target_emotion_tank`.
+
+> **Design Principle:** The emotion layer no longer asks *"What does fear look like?"*. Instead, it asks *"What evidence exists for fear?"*. Emotions are treated as emergent states that arise from accumulated appraisal evidence rather than pattern matches against predefined profiles.
+
 
 ---
 
