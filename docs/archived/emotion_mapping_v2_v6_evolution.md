@@ -80,8 +80,6 @@ With `ideal = 1.0`, any real-world HIGH activation (e.g., `0.70`, `0.65`) is alw
 
 ---
 
-## Resolution → Current Architecture (v7)
-
 The `ideal` for HIGH ranges was set to the **observed maximum cluster score across 200 test stimuli** rather than the theoretical `1.0`. For the right shoulder, any value `>= ideal` returns `1.0` (maximum contribution). Values below the observed max get a proportional score.
 
 LOW, MEDIUM, and MEDIUM_HIGH also use right-shoulder shapes with their effective tuples. This resolved both the plateau problem and the high-range diminishing return problem.

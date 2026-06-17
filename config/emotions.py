@@ -186,6 +186,129 @@ EMOTION_PROFILES = {
     }
 }
 
+EMOTION_SCHEMAS = {
+    "fear": {
+        "core": "threat",
+
+        "supporting": [
+            "novelty",
+            "urgency",
+            "discomfort"
+        ],
+
+        "contradicting": [
+            "familiarity",
+            "reward",
+        ]
+    },
+
+    "anger": {
+        "core": "discomfort",
+
+        "supporting": [
+            "threat",
+            "social_relevance",
+            "novelty",
+            "urgency"
+        ],
+
+        "contradicting": [
+            "reward",
+            "familiarity"
+        ]
+    },
+
+    "joy": {
+        "core": "reward",
+
+        "supporting": [
+            "affinity",
+            "novelty",
+            "social_relevance"
+        ],
+
+        "contradicting": [
+            "threat",
+            "discomfort",
+            "urgency"
+        ]
+    },
+
+    "sadness": {
+        "core": "discomfort",
+
+        "supporting": [
+            "threat",
+            "affinity",
+            "familiarity"
+        ],
+
+        "contradicting": [
+            "reward",
+            "urgency"
+        ]
+    },
+
+    "trust": {
+        "core": "familiarity",
+
+        "supporting": [
+            "affinity", 
+            "social_relevance", 
+            "reward"
+        ],
+
+        "contradicting": [
+            "threat", 
+            "novelty"
+        ]
+    },
+
+    "disgust": {
+        "core": "discomfort",
+
+        "supporting": [
+            "social_relevance", 
+            "novelty"
+        ],
+
+        "contradicting": [
+            "reward", 
+            "affinity", 
+            "familiarity"
+        ]
+    },
+
+    "anticipation": {
+        "core": "reward",
+
+        "supporting": [
+            "urgency", 
+            "novelty", 
+            "affinity"
+        ],
+
+        "contradicting": [
+            "familiarity", 
+            "discomfort"
+        ]
+    },
+
+    "surprise": {
+        "core": "novelty",
+
+        "supporting": [
+            "urgency", 
+            "social_relevance"
+        ],
+
+        "contradicting": [
+            "familiarity"
+        ]
+    }
+
+}
+
 
 REGULATIONS = {
     "fear":         { "suppress": "anger",        "release": "trust"       },
