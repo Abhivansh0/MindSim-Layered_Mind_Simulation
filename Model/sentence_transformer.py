@@ -7,3 +7,5 @@ REFERENCE_VECTORS = {}
 for cluster, ref in CLUSTER_REFERENCES.items():
     REFERENCE_VECTORS[cluster] = model.encode(ref)
 
+
+
