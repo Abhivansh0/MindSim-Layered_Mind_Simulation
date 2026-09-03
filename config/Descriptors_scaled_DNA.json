@@ -1,0 +1,181 @@
+{
+    "gregariousness": {
+        "joy": 0.1106,
+        "fear": -0.0228,
+        "sadness": -0.0169,
+        "disgust": 0.0074,
+        "anger": -0.02,
+        "anticipation": -0.0156,
+        "trust": 0.0195,
+        "surprise": -0.005
+    },
+    "friendliness": {
+        "joy": 0.0679,
+        "fear": -0.0109,
+        "sadness": -0.0051,
+        "disgust": 0.021,
+        "anger": -0.0353,
+        "anticipation": -0.0156,
+        "trust": 0.0195,
+        "surprise": -0.0073
+    },
+    "poise": {
+        "joy": 0.0939,
+        "fear": -0.0377,
+        "sadness": -0.0283,
+        "disgust": 0.0106,
+        "anger": -0.0307,
+        "anticipation": -0.025,
+        "trust": 0.0313,
+        "surprise": -0.0058
+    },
+    "provocativeness": {
+        "joy": 0.1045,
+        "fear": -0.0399,
+        "sadness": -0.0316,
+        "disgust": 0.0016,
+        "anger": -0.0184,
+        "anticipation": -0.022,
+        "trust": 0.0275,
+        "surprise": -0.01
+    },
+    "self_disclosure": {
+        "joy": 0.0566,
+        "fear": 0.0099,
+        "sadness": 0.012,
+        "disgust": 0.0227,
+        "anger": -0.0295,
+        "anticipation": -0.0053,
+        "trust": 0.0066,
+        "surprise": -0.0132
+    },
+    "talkativeness": {
+        "joy": 0.0757,
+        "fear": 0.0129,
+        "sadness": 0.0112,
+        "disgust": 0.0054,
+        "anger": -0.0028,
+        "anticipation": 0.0043,
+        "trust": -0.0054,
+        "surprise": -0.0199
+    },
+    "sociability": {
+        "joy": 0.0934,
+        "fear": -0.0053,
+        "sadness": -0.0011,
+        "disgust": 0.0177,
+        "anger": -0.0282,
+        "anticipation": -0.0111,
+        "trust": 0.0138,
+        "surprise": -0.0019
+    },
+    "warmth": {
+        "joy": 0.0547,
+        "fear": -0.0049,
+        "sadness": 0.0003,
+        "disgust": 0.0238,
+        "anger": -0.0371,
+        "anticipation": -0.0137,
+        "trust": 0.0172,
+        "surprise": -0.0088
+    },
+    "happiness": {
+        "joy": 0.0794,
+        "fear": -0.058,
+        "sadness": -0.049,
+        "disgust": 0.0091,
+        "anger": -0.0388,
+        "anticipation": -0.038,
+        "trust": 0.0475,
+        "surprise": 0.0062
+    },
+    "stability": {
+        "joy": 0.0502,
+        "fear": -0.0523,
+        "sadness": -0.0439,
+        "disgust": 0.0055,
+        "anger": -0.0306,
+        "anticipation": -0.0325,
+        "trust": 0.0406,
+        "surprise": 0.0044
+    },
+    "calmness": {
+        "joy": 0.0387,
+        "fear": -0.027,
+        "sadness": -0.0175,
+        "disgust": 0.0235,
+        "anger": -0.0454,
+        "anticipation": -0.0253,
+        "trust": 0.0317,
+        "surprise": -0.0025
+    },
+    "toughness": {
+        "joy": 0.049,
+        "fear": -0.0516,
+        "sadness": -0.0419,
+        "disgust": 0.0038,
+        "anger": -0.0268,
+        "anticipation": -0.0301,
+        "trust": 0.0377,
+        "surprise": 0.0018
+    },
+    "imperturbability": {
+        "anger": -0.0046,
+        "fear": -0.0408,
+        "disgust": 0.0018,
+        "sadness": -0.0423,
+        "joy": 0.0362,
+        "trust": 0.0238,
+        "anticipation": -0.0302,
+        "surprise": 0.0153
+    },
+    "tranquility": {
+        "anger": 0.0002,
+        "fear": -0.0215,
+        "disgust": 0.0035,
+        "sadness": -0.0298,
+        "joy": 0.0268,
+        "trust": 0.0178,
+        "anticipation": -0.0238,
+        "surprise": 0.0208
+    },
+    "intellect": {
+        "joy": 0.0551,
+        "anger": -0.0049,
+        "trust": 0.0119,
+        "fear": -0.0243,
+        "sadness": -0.0194,
+        "anticipation": -0.013,
+        "surprise": -0.0302
+    },
+    "ingenuity": {
+        "joy": 0.0818,
+        "fear": -0.0434,
+        "sadness": -0.0343,
+        "disgust": 0.0022,
+        "anger": -0.0206,
+        "anticipation": -0.0241,
+        "trust": 0.0302,
+        "surprise": -0.0192
+    },
+    "introspection": {
+        "anger": 0.0225,
+        "fear": 0.0455,
+        "disgust": 0.0041,
+        "sadness": 0.0384,
+        "joy": -0.0296,
+        "trust": -0.0273,
+        "anticipation": 0.021,
+        "surprise": -0.0319
+    },
+    "imagination": {
+        "joy": 0.0286,
+        "fear": -0.004,
+        "sadness": -0.0017,
+        "disgust": 0.0085,
+        "anger": -0.0141,
+        "anticipation": -0.0061,
+        "trust": 0.0076,
+        "surprise": -0.0378
+    }
+}

@@ -34,6 +34,7 @@ class SimulationEngine:
         self.mind_state.stimulus_vector = stimulus_vector
         self.neuron_layer.hebbian_strengthening()
         self.emotion_layer.process_targets()
+        
     
     def background_process(self):
         while self.running:

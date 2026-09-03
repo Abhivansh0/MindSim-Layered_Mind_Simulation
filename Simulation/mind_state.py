@@ -35,7 +35,17 @@ class MindState:
             "trends":{},
             "dominant": None
         })
-    personality_state: dict = field(default_factory=dict)
+    personality_state: dict = field(
+        default_factory=lambda:{
+        "ocean" : {
+            "openness": 0.0,
+            "conscientiousness": 0.0,
+            "extraversion": 0.0,
+            "agreeableness": 0.0,
+            "neuroticism": 0.0
+        },
+        "active_complex_traits" : {}
+    })
     active_thoughts: list = field(default_factory=list)
     mode: str = "active"
 
