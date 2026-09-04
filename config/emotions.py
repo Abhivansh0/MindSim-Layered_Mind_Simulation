@@ -305,7 +305,6 @@ EMOTION_SCHEMAS = {
             "familiarity"
         ]
     }
-
 }
 
 REGULATIONS = {
