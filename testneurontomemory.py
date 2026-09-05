@@ -138,12 +138,17 @@ class MemoryLayer:
         })
 
 
+   
     def _snapshot_emotion_map(self) -> Dict[str, float]:
         snapshot = {}
         for emotion, data in self.mind_state.emotional_state["base"].items():
             snapshot[emotion] = data["value"]              # pull just the value, drop any extra metadata
         for compound, value in self.mind_state.emotional_state["compounds"].items():
             snapshot[compound] = value                      # compounds are stored as plain values already
+
+
+        self.mind_state.emotional_state["combined"] = snapshot
+
         return snapshot
 
 
@@ -205,7 +210,12 @@ class MemoryLayer:
         for memory in top_memories:
             self._update_recall_metadata(memory)              # recalling a memory boosts its strength and logs the recall
 
-        return top_memories
+        formatted = [self._format_output(memory) for memory in top_memories]
+
+        # v2: publish results onto mind_state so Cognition Layer can read what was just recalled
+        self.mind_state.working_memory["retrieved_memories"] = formatted
+
+        return formatted
 
 
     def _filter_by_threshold(self, query_result, threshold: float, collection_name: str):

@@ -1,355 +1,683 @@
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from collections import deque
 from typing import Dict, List, Optional
 import uuid
 import ast
+import json
+import math
 import chromadb
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# MEMORY DATACLASS
-# ─────────────────────────────────────────────────────────────────────────────
 
 @dataclass
 class Memory:
     id: str
-    stimulus_summary: str
-    response_summary: str
-    stimulus_vector: List[float]
-    emotion_map: Dict[str, float]
-    initial_emotional_weight: float     # frozen at creation, never changes
-    strength: float                     # starts equal to initial_emotional_weight, decays over time
-    timestamp: datetime
-    recall_count: int = 0
-    last_recalled: Optional[datetime] = None
-    permanent: bool = False             # never decays, never changes collection
+    stimulusSummary: str
+    responseSummary: str
+    stimulusVector: List[float]
+    emotionMap: Dict[str, float]
+    initialEmotionalWeight: float
+    createdAt: datetime
+    recallHistory: List[datetime] = field(default_factory=list)
+    emotionContext: str = ""
+    temporalLinks: Dict[str, float] = field(default_factory=dict)
+    semanticLinks: Dict[str, float] = field(default_factory=dict)
+    emotionalLinks: Dict[str, float] = field(default_factory=dict)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# MEMORY LAYER
-# ─────────────────────────────────────────────────────────────────────────────
 
 class MemoryLayer:
 
-    # --- Emotional weight formula ---
-    PERMANENT_CUTOFF         = 0.95
+    MIN_DECAY_PARAMETER = 0.3
+    MAX_DECAY_PARAMETER = 0.7
+
     ACTIVE_EMOTION_THRESHOLD = 0.30
     COMPOUND_BONUS           = 0.08
     COMPLEXITY_CAP           = 0.20
 
-    # --- Retrieval ---
-    ACTIVE_SIMILARITY_THRESHOLD   = 0.50
-    DORMANT_SIMILARITY_THRESHOLD  = 0.65
-    ARCHIVED_SIMILARITY_THRESHOLD = 0.87
-    RECALL_BOOST_RATE             = 0.15
-    TOP_K                         = 5
+    SEMANTIC_CANDIDATE_LIMIT  = 30
+    EMOTIONAL_CANDIDATE_LIMIT = 30
 
-    # --- Decay ---
-    BASE_DECAY_RATE  = 0.005
-    DECAY_THRESHOLD  = 0.30
-    DORMANT_CUTOFF   = 0.70
+    SEMANTIC_CANDIDATE_THRESHOLD   = 0.5
+    RETRIEVAL_ACTIVATION_THRESHOLD = 0.5
 
-    # --- Context window ---
+    LOW_MEDIUM_THRESHOLD  = 0.33
+    MEDIUM_HIGH_THRESHOLD = 0.66
+
+    LOW_BUCKET_VALUE    = 0.15
+    MEDIUM_BUCKET_VALUE = 0.5
+    HIGH_BUCKET_VALUE   = 1.0
+
+    EMOTION_CONTEXT_SIMILARITY_THRESHOLD = 0.85
+
+    SPREAD_ACTIVATION_BUDGET = 1.0
+
+    TEMPORAL_HALF_LIFE = 30
+    MINIMUM_TEMPORAL_LINK_STRENGTH = 0.1
+
+    MIN_ELAPSED_DAYS_EPSILON = 1e-6
+
+    LATENCY_FACTOR = 0.3
+
     MAX_CONTEXT_WINDOW = 5
 
-    def __init__(self, mind_state):
-        self.mind_state = mind_state
-        self.context_window = deque(maxlen=self.MAX_CONTEXT_WINDOW)
+    def __init__(self, mindState):
+        self.mindState = mindState
+        self.contextWindow = deque(maxlen=self.MAX_CONTEXT_WINDOW)
 
-        self.chroma_client = chromadb.HttpClient(host="localhost", port=8000)
+        self.emotionOrder = sorted(mindState.emotional_state["base"].keys())
 
-        # three separate collections — one per tier
-        self.active_collection   = self.chroma_client.get_or_create_collection(
-            name="mindsim_active",
+        self.temporalDecayRate = math.log(2) / self.TEMPORAL_HALF_LIFE
+
+        self.temporalWindowMinutes = math.log(1 / self.MINIMUM_TEMPORAL_LINK_STRENGTH) / self.temporalDecayRate
+
+       
+        self.activeChunks: Dict[str, datetime] = {}
+
+        self.chromaClient = chromadb.HttpClient(host="localhost", port=8000)
+
+        self.collection = self.chromaClient.get_or_create_collection(
+            name="mindsim_memories",
             metadata={"hnsw:space": "cosine"}
         )
-        self.dormant_collection  = self.chroma_client.get_or_create_collection(
-            name="mindsim_dormant",
-            metadata={"hnsw:space": "cosine"}
-        )
-        self.archived_collection = self.chroma_client.get_or_create_collection(
-            name="mindsim_archived",
-            metadata={"hnsw:space": "cosine"}
-        )
 
-        print(
-            f"ChromaDB Ready | "
-            f"Active: {self.active_collection.count()} | "
-            f"Dormant: {self.dormant_collection.count()} | "
-            f"Archived: {self.archived_collection.count()}"
-        )
+        self.contextBoxes: Dict[str, List[str]] = self.loadContextBoxes()
+
+        print(f"ChromaDB Ready | Memories: {self.collection.count()} | Emotion boxes: {len(self.contextBoxes)}")
 
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # STORAGE SUBMODULE
-    # ─────────────────────────────────────────────────────────────────────────
+    # ═════════════════════════════════════════════════════════════════════════
+    # STORAGE
+    # ═════════════════════════════════════════════════════════════════════════
 
-    def create_memory(
+    def createMemory(
         self,
-        stimulus_summary: str,
-        response_summary: str,
+        stimulusSummary: str,
+        responseSummary: str,
     ) -> Memory:
 
-        stimulus_vector = self.mind_state.stimulus_vector.tolist()
-        emotion_snapshot = self._snapshot_emotion_map()
-        initial_emotional_weight = self._calculate_emotional_weight()
-        permanent = initial_emotional_weight > self.PERMANENT_CUTOFF
+        stimulusVector = self.mindState.stimulus_vector.tolist()
+        emotionSnapshot = self.snapshotEmotionMap()
+        initialEmotionalWeight = self.calculateEmotionalWeight()
+        emotionContext = self.computeEmotionContext(emotionSnapshot)
 
         memory = Memory(
             id=str(uuid.uuid4()),
-            stimulus_summary=stimulus_summary,
-            response_summary=response_summary,
-            stimulus_vector=stimulus_vector,
-            emotion_map=emotion_snapshot,
-            initial_emotional_weight=initial_emotional_weight,
-            strength=initial_emotional_weight,
-            timestamp=datetime.now(),
-            permanent=permanent
+            stimulusSummary=stimulusSummary,
+            responseSummary=responseSummary,
+            stimulusVector=stimulusVector,
+            emotionMap=emotionSnapshot,
+            initialEmotionalWeight=initialEmotionalWeight,
+            createdAt=datetime.now(),
+            recallHistory=[],
+            emotionContext=emotionContext,
         )
 
-        # all memories are born in the active collection
-        self.active_collection.add(
+        self.collection.add(
             ids=[memory.id],
-            embeddings=[memory.stimulus_vector],
+            embeddings=[memory.stimulusVector],
             metadatas=[{
-                "stimulus_summary":         memory.stimulus_summary,
-                "response_summary":         memory.response_summary,
-                "initial_emotional_weight": memory.initial_emotional_weight,
-                "strength":                 memory.strength,
-                "recall_count":             memory.recall_count,
-                "last_recalled":            "",
-                "timestamp":                str(memory.timestamp),
-                "emotion_map":              str(emotion_snapshot)
+                "stimulusSummary":         memory.stimulusSummary,
+                "responseSummary":         memory.responseSummary,
+                "initialEmotionalWeight": memory.initialEmotionalWeight,
+                "createdAt":               memory.createdAt.isoformat(),
+                "createdAtEpoch":         memory.createdAt.timestamp(),
+                "recallHistory":           json.dumps([]),
+                "emotionMap":              str(emotionSnapshot),
+                "emotionContext":          memory.emotionContext,
+                "temporalLinks":           json.dumps({}),
+                "semanticLinks":           json.dumps({}),
+                "emotionalLinks":          json.dumps({}),
             }]
         )
 
+        self.establishLinksForNewMemory(memory)
+        self.registerMemoryInContextBox(memory.id, memory.emotionContext)
+
         print(
             f"Memory stored | "
-            f"weight: {memory.initial_emotional_weight:.2f} | "
-            f"permanent: {memory.permanent} | "
-            f"'{memory.stimulus_summary}'"
+            f"weight: {memory.initialEmotionalWeight:.2f} | "
+            f"context: {memory.emotionContext} | "
+            f"'{memory.stimulusSummary}'"
         )
 
         return memory
 
 
-    def update_context_window(self, stimulus: str, response: str):
-        self.context_window.append({
+    def establishLinksForNewMemory(self, memory: Memory):
+        temporalNeighbors  = self.getTemporalCandidates(memory.createdAt, excludeId=memory.id)
+        semanticNeighbors  = self.getSemanticLinkCandidates(memory.id, memory.stimulusVector)
+        emotionalNeighbors = self.getEmotionalCandidates(memory.emotionMap)
+        emotionalNeighbors.pop(memory.id, None)   # a memory always matches its own box perfectly — exclude that trivial hit
+
+        self.writeLinkPair(memory.id, temporalNeighbors, "temporalLinks")
+        self.writeLinkPair(memory.id, semanticNeighbors, "semanticLinks")
+        self.writeLinkPair(memory.id, emotionalNeighbors, "emotionalLinks")
+
+
+    def writeLinkPair(self, newMemoryId: str, neighbors: Dict[str, float], fieldName: str):
+        if not neighbors:
+            return
+
+        newMemoryMetadata = self.fetchMemoryById(newMemoryId)
+        newMemoryLinks = json.loads(newMemoryMetadata[fieldName])
+
+        for neighborId, strength in neighbors.items():
+            newMemoryLinks[neighborId] = strength
+
+            neighborMetadata = self.fetchMemoryById(neighborId)
+            if neighborMetadata is None:
+                continue
+            neighborLinks = json.loads(neighborMetadata[fieldName])
+            neighborLinks[newMemoryId] = strength   # undirected — write the same strength on the other side too
+            self.collection.update(
+                ids=[neighborId],
+                metadatas=[{**neighborMetadata, fieldName: json.dumps(neighborLinks)}]
+            )
+
+        self.collection.update(
+            ids=[newMemoryId],
+            metadatas=[{**newMemoryMetadata, fieldName: json.dumps(newMemoryLinks)}]
+        )
+
+
+    def updateContextWindow(self, stimulus: str, response: str):
+        self.contextWindow.append({
             "stimulus":  stimulus,
             "response":  response,
             "timestamp": datetime.now()
         })
 
 
-    def _snapshot_emotion_map(self) -> Dict[str, float]:
+    def snapshotEmotionMap(self) -> Dict[str, float]:
         snapshot = {}
-        for emotion, data in self.mind_state.emotional_state["base"].items():
+        for emotion, data in self.mindState.emotional_state["base"].items():
             snapshot[emotion] = data["value"]
-        for compound, value in self.mind_state.emotional_state["compounds"].items():
+        for compound, value in self.mindState.emotional_state["compounds"].items():
             snapshot[compound] = value
         return snapshot
 
 
-    def _calculate_emotional_weight(self) -> float:
-        base_values = [
+    def calculateEmotionalWeight(self) -> float:
+        baseValues = [
             data["value"]
-            for data in self.mind_state.emotional_state["base"].values()
+            for data in self.mindState.emotional_state["base"].values()
         ]
-        compound_values = list(
-            self.mind_state.emotional_state["compounds"].values()
+        compoundValues = list(
+            self.mindState.emotional_state["compounds"].values()
         )
-        all_values = base_values + compound_values
+        allValues = baseValues + compoundValues
 
-        if not all_values:
+        if not allValues:
             return 0.0
 
-        peak = max(all_values)
-        active_emotions = [v for v in base_values if v >= self.ACTIVE_EMOTION_THRESHOLD]
-        active_average = (sum(active_emotions) / len(active_emotions)) if active_emotions else 0.0
-        complexity = min(len(compound_values) * self.COMPOUND_BONUS, self.COMPLEXITY_CAP)
+        peak = max(allValues)
+        activeEmotions = [v for v in baseValues if v >= self.ACTIVE_EMOTION_THRESHOLD]
+        activeAverage = (sum(activeEmotions) / len(activeEmotions)) if activeEmotions else 0.0
+        complexity = min(len(compoundValues) * self.COMPOUND_BONUS, self.COMPLEXITY_CAP)
 
-        emotional_weight = (peak * 0.65) + (active_average * 0.25) + complexity
-        return max(0.0, min(emotional_weight, 1.0))
-
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # RETRIEVAL SUBMODULE
-    # ─────────────────────────────────────────────────────────────────────────
-
-    def retrieve_memories(self, stimulus_vector, top_k=None):
-        if top_k is None:
-            top_k = self.TOP_K
-
-        stimulus_vector = stimulus_vector.tolist() if hasattr(stimulus_vector, "tolist") else stimulus_vector
-
-        candidates = []
-
-        # all three collections queried every time
-        # what makes archived hard to surface is the 0.87 threshold gate, not whether we search it
-        for collection, threshold in [
-            (self.active_collection,   self.ACTIVE_SIMILARITY_THRESHOLD),
-            (self.dormant_collection,  self.DORMANT_SIMILARITY_THRESHOLD),
-            (self.archived_collection, self.ARCHIVED_SIMILARITY_THRESHOLD),
-        ]:
-            if collection.count() == 0:
-                continue
-
-            results = collection.query(
-                query_embeddings=[stimulus_vector],
-                n_results=min(top_k * 2, collection.count())
-            )
-
-            candidates += self._filter_by_threshold(results, threshold, collection.name)
-
-        # rank by similarity * strength, take top k
-        candidates.sort(key=lambda c: c["similarity"] * c["metadata"]["strength"], reverse=True)
-        top_memories = candidates[:top_k]
-
-        for memory in top_memories:
-            self._update_recall_metadata(memory)
-
-        return [self._format_output(memory) for memory in top_memories]
+        emotionalWeight = (peak * 0.65) + (activeAverage * 0.25) + complexity
+        return max(0.0, min(emotionalWeight, 1.0))
 
 
-    def _filter_by_threshold(self, query_result, threshold: float, collection_name: str):
-        passed = []
+    def memoryFromMetadata(self, memoryId: str, metadata: dict) -> Memory:
+        return Memory(
+            id=memoryId,
+            stimulusSummary=metadata["stimulusSummary"],
+            responseSummary=metadata["responseSummary"],
+            stimulusVector=[],
+            emotionMap=ast.literal_eval(metadata["emotionMap"]),
+            initialEmotionalWeight=metadata["initialEmotionalWeight"],
+            createdAt=datetime.fromisoformat(metadata["createdAt"]),
+            recallHistory=[datetime.fromisoformat(t) for t in json.loads(metadata["recallHistory"])],
+            emotionContext=metadata.get("emotionContext", ""),
+            temporalLinks=json.loads(metadata.get("temporalLinks", "{}")),
+            semanticLinks=json.loads(metadata.get("semanticLinks", "{}")),
+            emotionalLinks=json.loads(metadata.get("emotionalLinks", "{}")),
+        )
 
-        ids       = query_result["ids"][0]
-        metadatas = query_result["metadatas"][0]
-        distances = query_result["distances"][0]
+
+    def fetchMemoryById(self, memoryId: str):
+        result = self.collection.get(ids=[memoryId])
+        if result["ids"]:
+            return result["metadatas"][0]
+        return None
+
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # CANDIDATE GENERATION
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def getSemanticCandidates(self, stimulusVector) -> Dict[str, dict]:
+        candidates = {}
+
+        if self.collection.count() == 0:
+            return candidates
+
+        results = self.collection.query(
+            query_embeddings=[stimulusVector],
+            n_results=min(self.SEMANTIC_CANDIDATE_LIMIT, self.collection.count())
+        )
+
+        ids       = results["ids"][0]
+        metadatas = results["metadatas"][0]
+        distances = results["distances"][0]
 
         for id_, metadata, distance in zip(ids, metadatas, distances):
             similarity = 1 - distance
-            print(f"    [debug] '{metadata['stimulus_summary']}' | collection={collection_name} | similarity={similarity:.4f} | threshold={threshold}")
-            if similarity >= threshold:
-                passed.append({
-                    "id":              id_,
-                    "metadata":        metadata,
-                    "similarity":      similarity,
-                    "collection_name": collection_name
-                })
+            if similarity < self.SEMANTIC_CANDIDATE_THRESHOLD:
+                continue
+            candidates[id_] = {
+                "memory":            self.memoryFromMetadata(id_, metadata),
+                "semanticRelevance": similarity,
+            }
 
-        return passed
+        return candidates
 
 
-    def _get_collection_by_name(self, collection_name: str):
-        if collection_name == "mindsim_active":
-            return self.active_collection
-        elif collection_name == "mindsim_dormant":
-            return self.dormant_collection
-        elif collection_name == "mindsim_archived":
-            return self.archived_collection
+    # ═════════════════════════════════════════════════════════════════════════
+    # SEMANTIC LINKING (memory-to-memory)
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def getSemanticLinkCandidates(self, memoryId: str, stimulusVector: List[float]) -> Dict[str, float]:
+        candidates: Dict[str, float] = {}
+
+        if self.collection.count() == 0:
+            return candidates
+
+        results = self.collection.query(
+            query_embeddings=[stimulusVector],
+            n_results=min(self.SEMANTIC_CANDIDATE_LIMIT, self.collection.count())
+        )
+
+        ids       = results["ids"][0]
+        distances = results["distances"][0]
+
+        for id_, distance in zip(ids, distances):
+            if id_ == memoryId:
+                continue
+            similarity = 1 - distance
+            if similarity < self.SEMANTIC_CANDIDATE_THRESHOLD:
+                continue
+            candidates[id_] = similarity
+
+        return candidates
 
 
-    def _update_recall_metadata(self, memory):
-        metadata = memory["metadata"]
-        collection = self._get_collection_by_name(memory["collection_name"])
-
-        new_recall_count = metadata["recall_count"] + 1
-        current_strength = metadata["strength"]
-        new_strength = current_strength + (1 - current_strength) * self.RECALL_BOOST_RATE
-
-        updated_metadata = {
-            **metadata,
-            "recall_count": new_recall_count,
-            "strength":     new_strength,
-            "last_recalled": str(datetime.now())
+    def pruneActiveChunks(self, currentTime: datetime):
+        cutoff = currentTime - timedelta(minutes=self.temporalWindowMinutes)
+        self.activeChunks = {
+            memoryId: activatedAt
+            for memoryId, activatedAt in self.activeChunks.items()
+            if activatedAt >= cutoff
         }
 
-        # dormant memory recalled -> move it to active collection
-        if memory["collection_name"] == "mindsim_dormant":
-            self.active_collection.add(
-                ids=[memory["id"]],
-                embeddings=[self.dormant_collection.get(
-                    ids=[memory["id"]], include=["embeddings"]
-                )["embeddings"][0]],
-                metadatas=[updated_metadata]
-            )
-            self.dormant_collection.delete(ids=[memory["id"]])
-            memory["collection_name"] = "mindsim_active"
-            print(f"Memory revived to Active: '{metadata['stimulus_summary']}'")
+
+    def calculateTemporalSpread(self, memory: Memory, activeChunkIds: set, perSourceWeight: float) -> float:
+        return sum(
+            perSourceWeight * strength for neighborId, strength in memory.temporalLinks.items()
+            if neighborId in activeChunkIds
+        )
+
+
+    def calculateSemanticSpread(self, memory: Memory, activeChunkIds: set, perSourceWeight: float) -> float:
+        return sum(
+            perSourceWeight * strength for neighborId, strength in memory.semanticLinks.items()
+            if neighborId in activeChunkIds
+        )
+
+
+    def calculateEmotionalSpread(self, memory: Memory, activeChunkIds: set, perSourceWeight: float) -> float:
+        return sum(
+            perSourceWeight * strength for neighborId, strength in memory.emotionalLinks.items()
+            if neighborId in activeChunkIds
+        )
+
+
+
+    def bucketLetter(self, value: float) -> str:
+        if value < self.LOW_MEDIUM_THRESHOLD:
+            return "L"
+        elif value < self.MEDIUM_HIGH_THRESHOLD:
+            return "M"
         else:
-            collection.update(ids=[memory["id"]], metadatas=[updated_metadata])
-
-        memory["metadata"] = updated_metadata
+            return "H"
 
 
-    def _format_output(self, memory):
-        metadata = memory["metadata"]
+    def computeEmotionContext(self, emotionMap: Dict[str, float]) -> str:
+        return "".join(self.bucketLetter(emotionMap.get(name, 0.0)) for name in self.emotionOrder)
 
-        stimulus_summary = metadata["stimulus_summary"]
-        response_summary = metadata["response_summary"]
 
-        if memory["collection_name"] == "mindsim_archived":
-            stimulus_summary, response_summary = self._degrade_summary(
-                stimulus_summary, response_summary
-            )
+    def contextToVector(self, context: str) -> List[float]:
+        bucketValues = {"L": self.LOW_BUCKET_VALUE, "M": self.MEDIUM_BUCKET_VALUE, "H": self.HIGH_BUCKET_VALUE}
+        return [bucketValues[letter] for letter in context]
 
+
+    def cosineSimilarity(self, vectorA: List[float], vectorB: List[float]) -> float:
+        dot = sum(a * b for a, b in zip(vectorA, vectorB))
+        magnitudeA = math.sqrt(sum(a * a for a in vectorA))
+        magnitudeB = math.sqrt(sum(b * b for b in vectorB))
+        if magnitudeA == 0 or magnitudeB == 0:
+            return 0.0
+        return dot / (magnitudeA * magnitudeB)
+
+
+    def loadContextBoxes(self) -> Dict[str, List[str]]:
+        boxes: Dict[str, List[str]] = {}
+        if self.collection.count() == 0:
+            return boxes
+        records = self.collection.get()
+        for memoryId, metadata in zip(records["ids"], records["metadatas"]):
+            context = metadata.get("emotionContext", "")
+            if not context:
+                continue
+            boxes.setdefault(context, []).append(memoryId)
+        return boxes
+
+
+    def registerMemoryInContextBox(self, memoryId: str, context: str):
+        if not context:
+            return
+        self.contextBoxes.setdefault(context, []).append(memoryId)
+
+
+    def getPatternInfo(self, context: str) -> dict:
+        memberIds = self.contextBoxes.get(context, [])
         return {
-            "id":               memory["id"],
-            "stimulus_summary": stimulus_summary,
-            "response_summary": response_summary,
-            "emotion_map":      ast.literal_eval(metadata["emotion_map"]),
-            "strength":         metadata["strength"],
-            "collection":       memory["collection_name"],
-            "similarity":       memory["similarity"]
+            "signature": context,
+            "memoryIds": list(memberIds),
+            "count": len(memberIds),
         }
 
 
-    def _degrade_summary(self, stimulus_summary: str, response_summary: str):
-        # replace with LLM call when Cognition Layer is built
-        vague_stimulus = " ".join(stimulus_summary.split()[:3]) + "..."
-        vague_response = " ".join(response_summary.split()[:3]) + "..."
-        return vague_stimulus, vague_response
+    def getEmotionalCandidates(self, currentEmotionMap: Dict[str, float]) -> Dict[str, float]:
+        stimulusContext = self.computeEmotionContext(currentEmotionMap)
+        stimulusVector = self.contextToVector(stimulusContext)
 
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # DECAY LOOP
-    # ─────────────────────────────────────────────────────────────────────────
-
-    def run_decay(self):
-        all_active = self.active_collection.get()
-
-        for id_, metadata in zip(all_active["ids"], all_active["metadatas"]):
-            if metadata["permanent"]:
+        candidates: Dict[str, float] = {}
+        for context, memberIds in self.contextBoxes.items():
+            similarity = self.cosineSimilarity(stimulusVector, self.contextToVector(context))
+            if similarity < self.EMOTION_CONTEXT_SIMILARITY_THRESHOLD:
                 continue
 
-            reference_time_str = metadata["last_recalled"] if metadata["last_recalled"] else metadata["timestamp"]
-            days_since_recall = (datetime.now() - datetime.fromisoformat(reference_time_str)).days
+            for memoryId in memberIds:
+                candidates[memoryId] = similarity
 
-            effective_decay_rate = self.BASE_DECAY_RATE * (1 - metadata["initial_emotional_weight"])
-            new_strength = metadata["strength"] * ((1 - effective_decay_rate) ** days_since_recall)
-            new_strength = max(0.0, new_strength)
+        topCandidates = sorted(candidates.items(), key=lambda pair: pair[1], reverse=True)[:self.EMOTIONAL_CANDIDATE_LIMIT]
+        return dict(topCandidates)
 
-            if new_strength < self.DECAY_THRESHOLD:
-                # move to the right collection based on initial emotional weight
-                destination = (
-                    self.dormant_collection
-                    if metadata["initial_emotional_weight"] >= self.DORMANT_CUTOFF
-                    else self.archived_collection
-                )
-                destination_name = (
-                    "dormant" if metadata["initial_emotional_weight"] >= self.DORMANT_CUTOFF
-                    else "archived"
-                )
 
-                updated_metadata = {**metadata, "strength": new_strength}
+    # ═════════════════════════════════════════════════════════════════════════
+    # TEMPORAL LINKING
+    # ═════════════════════════════════════════════════════════════════════════
 
-                # add to destination first, delete from active only after success
-                embedding = self.active_collection.get(
-                    ids=[id_], include=["embeddings"]
-                )["embeddings"][0]
+    def calculateTemporalLinkStrength(self, deltaMinutes: float) -> float:
+        return math.exp(-self.temporalDecayRate * deltaMinutes)
 
-                destination.add(
-                    ids=[id_],
-                    embeddings=[embedding],
-                    metadatas=[updated_metadata]
-                )
-                self.active_collection.delete(ids=[id_])
 
-                print(f"Memory -> {destination_name}: '{metadata['stimulus_summary']}' (strength={new_strength:.3f})")
+    def getTemporalCandidates(self, referenceTime: datetime, excludeId: Optional[str] = None) -> Dict[str, float]:
+        referenceEpoch = referenceTime.timestamp()
+        windowSeconds = self.temporalWindowMinutes * 60
 
+        candidates: Dict[str, float] = {}
+        if self.collection.count() == 0:
+            return candidates
+
+        results = self.collection.get(
+            where={
+                "$and": [
+                    {"createdAtEpoch": {"$gte": referenceEpoch - windowSeconds}},
+                    {"createdAtEpoch": {"$lte": referenceEpoch + windowSeconds}},
+                ]
+            }
+        )
+
+        for memoryId, metadata in zip(results["ids"], results["metadatas"]):
+            if memoryId == excludeId:
+                continue
+            deltaMinutes = abs(referenceEpoch - metadata["createdAtEpoch"]) / 60
+            strength = self.calculateTemporalLinkStrength(deltaMinutes)
+            if strength >= self.MINIMUM_TEMPORAL_LINK_STRENGTH:
+                candidates[memoryId] = strength
+
+        return candidates
+
+
+    def mergeCandidates(self, semanticCandidates: Dict[str, dict], emotionalCandidates: Dict[str, float]) -> Dict[str, dict]:
+        merged = {}
+
+        for memoryId, info in semanticCandidates.items():
+            merged[memoryId] = {
+                "memory":              info["memory"],
+                "semanticRelevance":  info["semanticRelevance"],
+                "emotionalRelevance": 0.0,
+            }
+
+        for memoryId, linkStrength in emotionalCandidates.items():
+            if memoryId in merged:
+                merged[memoryId]["emotionalRelevance"] = linkStrength
             else:
-                updated_metadata = {**metadata, "strength": new_strength}
-                self.active_collection.update(ids=[id_], metadatas=[updated_metadata])
+                metadata = self.fetchMemoryById(memoryId)
+                if metadata is None:
+                    continue
+                merged[memoryId] = {
+                    "memory":              self.memoryFromMetadata(memoryId, metadata),
+                    "semanticRelevance":  0.0,
+                    "emotionalRelevance": linkStrength,
+                }
+
+        return merged
+
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # RELEVANCE
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def calculateUnifiedRelevance(self, semanticRelevance: float, emotionalRelevance: float) -> float:
+        return semanticRelevance + emotionalRelevance - (semanticRelevance * emotionalRelevance)
+
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # ACCESSIBILITY (Base-Level Activation)
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def calculateDecayParameter(self, emotionalWeight: float) -> float:
+        d = 0.5 - 0.2 * ((2 * emotionalWeight - 1) ** 3)
+        return max(self.MIN_DECAY_PARAMETER, min(d, self.MAX_DECAY_PARAMETER))
+
+
+    def calculateBla(self, memory: Memory, currentTime: datetime) -> float:
+        dI = self.calculateDecayParameter(memory.initialEmotionalWeight)
+        referencePoints = [memory.createdAt] + memory.recallHistory
+
+        total = 0.0
+        for referenceTime in referencePoints:
+            elapsedDays = (currentTime - referenceTime).total_seconds() / 86400
+            elapsedDays = max(elapsedDays, self.MIN_ELAPSED_DAYS_EPSILON)
+            total += elapsedDays ** (-dI)
+
+        return math.log(total)
+
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # RETRIEVAL
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def calculateRetrievalActivation(
+        self,
+        unifiedRelevance: float,
+        bla: float,
+        spreadTemporal: float = 0.0,
+        spreadSemantic: float = 0.0,
+        spreadEmotional: float = 0.0,
+    ) -> float:
+        return unifiedRelevance + bla + spreadTemporal + spreadSemantic + spreadEmotional
+
+
+    def passesRetrievalCriterion(self, activation: float) -> bool:
+        return activation >= self.RETRIEVAL_ACTIVATION_THRESHOLD
+
+
+    def calculateRetrievalLatency(self, activation: float) -> float:
+        return self.LATENCY_FACTOR * math.exp(-activation)
+
+
+    def retrieveMemories(self, stimulusVector, currentTime: Optional[datetime] = None) -> Dict[str, list]:
+        if currentTime is None:
+            currentTime = datetime.now()
+
+        stimulusVector = stimulusVector.tolist() if hasattr(stimulusVector, "tolist") else stimulusVector
+
+        semanticCandidates  = self.getSemanticCandidates(stimulusVector)
+        emotionalCandidates = self.getEmotionalCandidates(self.snapshotEmotionMap())
+
+        merged = self.mergeCandidates(semanticCandidates, emotionalCandidates)
+
+        # snapshot BEFORE this round's own results exist — a candidate must never spread to/from
+        # something only just recalled in this same pass, only from genuinely prior activity
+        self.pruneActiveChunks(currentTime)
+        activeChunkIds = set(self.activeChunks.keys())
+
+        perSourceWeight = (
+            self.SPREAD_ACTIVATION_BUDGET / len(activeChunkIds) if activeChunkIds else 0.0
+        )
+
+        successes = []
+        for memoryId, candidate in merged.items():
+            unifiedRelevance = self.calculateUnifiedRelevance(
+                candidate["semanticRelevance"], candidate["emotionalRelevance"]
+            )
+
+            memory = candidate["memory"]
+            bla = self.calculateBla(memory, currentTime)
+            spreadTemporal = self.calculateTemporalSpread(memory, activeChunkIds, perSourceWeight)
+            spreadSemantic = self.calculateSemanticSpread(memory, activeChunkIds, perSourceWeight)
+            spreadEmotional = self.calculateEmotionalSpread(memory, activeChunkIds, perSourceWeight)
+
+            activation = self.calculateRetrievalActivation(
+                unifiedRelevance, bla, spreadTemporal, spreadSemantic, spreadEmotional
+            )
+            if not self.passesRetrievalCriterion(activation):
+                continue
+
+            latency = self.calculateRetrievalLatency(activation)
+            self.recordSuccessfulRecall(candidate, memoryId, currentTime)
+
+            successes.append(self.formatOutput(
+                memoryId, candidate, unifiedRelevance, bla,
+                spreadTemporal, spreadSemantic, spreadEmotional, activation, latency
+            ))
+
+        recalledIds = {memory["id"] for memory in successes}
+        associative = self.expandViaMemoryLinks(recalledIds, currentTime)
+
+        # this round's results become part of "what's active" for the NEXT retrieval's spread activation
+        for memoryId in recalledIds | {memory["id"] for memory in associative}:
+            self.activeChunks[memoryId] = currentTime
+
+        return {
+            "recalled": successes,
+            "associativelyActivated": associative,
+        }
+
+
+    def expandViaMemoryLinks(self, recalledIds: set, currentTime: datetime) -> List[dict]:
+        # one hop only, from whichever memories actually made the final pool — never from a rejected candidate,
+        # and never cascading further out from whatever gets pulled in here. Reads each source's permanently
+        # stored links directly instead of recomputing anything live.
+        linkedVia: Dict[str, List[dict]] = {}
+
+        for sourceId in recalledIds:
+            sourceMetadata = self.fetchMemoryById(sourceId)
+            sourceMemory = self.memoryFromMetadata(sourceId, sourceMetadata)
+
+            for linkType, neighbors in [
+                ("temporal", sourceMemory.temporalLinks),
+                ("semantic", sourceMemory.semanticLinks),
+                ("emotional", sourceMemory.emotionalLinks),
+            ]:
+                for neighborId, strength in neighbors.items():
+                    if neighborId in recalledIds:
+                        continue   # already earned its own way in — don't also list it as a free-riding neighbor
+                    linkedVia.setdefault(neighborId, []).append(
+                        {"sourceMemoryId": sourceId, "linkType": linkType, "strength": strength}
+                    )
+
+        associativeOutput = []
+        for neighborId, links in linkedVia.items():
+            metadata = self.fetchMemoryById(neighborId)
+            memory = self.memoryFromMetadata(neighborId, metadata)
+
+            # rode in via association, but it still genuinely came to mind — counts as a real recall
+            memory.recallHistory.append(currentTime)
+            self.persistRecall(memory)
+
+            associativeOutput.append({
+                "id":               neighborId,
+                "stimulusSummary": memory.stimulusSummary,
+                "responseSummary": memory.responseSummary,
+                "emotionMap":      memory.emotionMap,
+                "linkedVia":       links,
+            })
+
+        return associativeOutput
+
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # RECALL UPDATE
+    # ═════════════════════════════════════════════════════════════════════════
+
+    def persistRecall(self, memory: Memory):
+        self.collection.update(
+            ids=[memory.id],
+            metadatas=[{
+                "stimulusSummary":         memory.stimulusSummary,
+                "responseSummary":         memory.responseSummary,
+                "initialEmotionalWeight": memory.initialEmotionalWeight,
+                "createdAt":               memory.createdAt.isoformat(),
+                "createdAtEpoch":         memory.createdAt.timestamp(),
+                "recallHistory":           json.dumps([t.isoformat() for t in memory.recallHistory]),
+                "emotionMap":              str(memory.emotionMap),
+                "emotionContext":          memory.emotionContext,
+                "temporalLinks":           json.dumps(memory.temporalLinks),
+                "semanticLinks":           json.dumps(memory.semanticLinks),
+                "emotionalLinks":          json.dumps(memory.emotionalLinks),
+            }]
+        )
+
+
+    def recordSuccessfulRecall(self, candidate: dict, memoryId: str, currentTime: datetime):
+        memory = candidate["memory"]
+        memory.recallHistory.append(currentTime)
+        self.persistRecall(memory)
+
+
+    def formatOutput(
+        self,
+        memoryId: str,
+        candidate: dict,
+        semanticRelevance: float,
+        emotionalRelevance: float,
+        bla: float,
+        spreadTemporal: float,
+        spreadSemantic: float,
+        spreadEmotional: float,
+        activation: float,
+        latency: float,
+    ) -> dict:
+        memory = candidate["memory"]
+        return {
+            "id":                   memoryId,
+            "stimulusSummary":     memory.stimulusSummary,
+            "responseSummary":     memory.responseSummary,
+            "emotionMap":          memory.emotionMap,
+            "semanticRelevance":   semanticRelevance,
+            "emotionalRelevance":  emotionalRelevance,
+            "baseLevelActivation": bla,
+            "temporal_spread_activation": spreadTemporal,
+            "semanticSpreadActivation": spreadSemantic,
+            "emotionalSpreadActivation": spreadEmotional,
+            "retrievalActivation":  activation,
+            "retrievalLatency":     latency,
+        }
