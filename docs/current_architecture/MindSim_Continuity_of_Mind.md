@@ -47,8 +47,6 @@ This means associative relationships built from recent experience remain availab
 
 The Emotion Layer does not snap emotion values directly to whatever a given tick's appraisal computes. Each emotion moves toward its computed target value at its own inertia rate, meaning a strongly-felt emotion doesn't vanish the instant the triggering appraisal stops being reinforced — it decays toward the new target gradually, at a rate specific to that emotion.
 
-If fear is strongly elevated by one stimulus, and the very next stimulus is unrelated and mildly positive, fear does not reset to its baseline before the next tick's blending happens. It moves toward whatever the new appraisal computes, but starting from its still-elevated position — meaning genuine fear can still be present, measurably, while a happy stimulus is simultaneously being processed.
-
 ---
 
 ## How These Combine
