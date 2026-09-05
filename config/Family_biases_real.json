@@ -1,0 +1,154 @@
+{
+    "gregariousness": {
+        "emotional_bias": 0.559
+    },
+    "friendliness": {
+        "response_bias": 0.518,
+        "emotional_bias": 0.482
+    },
+    "assertiveness": {
+        "response_bias": 0.641
+    },
+    "poise": {
+        "emotional_bias": 0.525
+    },
+    "leadership": {
+        "response_bias": 0.61
+    },
+    "provocativeness": {
+        "emotional_bias": 0.54
+    },
+    "self_disclosure": {
+        "response_bias": 0.522,
+        "emotional_bias": 0.478
+    },
+    "talkativeness": {
+        "emotional_bias": 0.541,
+        "response_bias": 0.459
+    },
+    "sociability": {
+        "emotional_bias": 0.525,
+        "response_bias": 0.475
+    },
+    "understanding": {
+        "response_bias": 0.804
+    },
+    "warmth": {
+        "response_bias": 0.546,
+        "emotional_bias": 0.454
+    },
+    "morality": {
+        "response_bias": 0.904
+    },
+    "pleasantness": {
+        "response_bias": 0.807
+    },
+    "empathy": {
+        "response_bias": 0.669
+    },
+    "cooperation": {
+        "response_bias": 0.797
+    },
+    "sympathy": {
+        "response_bias": 0.583
+    },
+    "tenderness": {
+        "response_bias": 0.658
+    },
+    "nurturance": {
+        "response_bias": 0.792
+    },
+    "conscientiousness": {
+        "response_bias": 0.935
+    },
+    "efficiency": {
+        "response_bias": 0.716
+    },
+    "dutifulness": {
+        "response_bias": 0.898
+    },
+    "purposefulness": {
+        "response_bias": 0.79
+    },
+    "organization": {
+        "response_bias": 0.77
+    },
+    "cautiousness": {
+        "response_bias": 0.827
+    },
+    "rationality": {
+        "response_bias": 0.649
+    },
+    "perfectionism": {
+        "response_bias": 0.782
+    },
+    "orderliness": {
+        "response_bias": 0.891
+    },
+    "stability": {
+        "persistence_bias": 0.386,
+        "emotional_bias": 0.309,
+        "response_bias": 0.305
+    },
+    "happiness": {
+        "emotional_bias": 0.472
+    },
+    "calmness": {
+        "response_bias": 0.388,
+        "emotional_bias": 0.352,
+        "persistence_bias": 0.26
+    },
+    "moderation": {
+        "response_bias": 0.597
+    },
+    "toughness": {
+        "response_bias": 0.389,
+        "persistence_bias": 0.34,
+        "emotional_bias": 0.272
+    },
+    "impulse_control": {
+        "response_bias": 0.582
+    },
+    "imperturbability": {
+        "emotional_bias": 0.4,
+        "persistence_bias": 0.316,
+        "response_bias": 0.284
+    },
+    "cool_headedness": {
+        "response_bias": 0.842
+    },
+    "tranquility": {
+        "emotional_bias": 0.4,
+        "response_bias": 0.35
+    },
+    "intellect": {
+        "response_bias": 0.514,
+        "emotional_bias": 0.486
+    },
+    "ingenuity": {
+        "emotional_bias": 0.517
+    },
+    "reflection": {
+        "response_bias": 0.652
+    },
+    "competence": {
+        "response_bias": 0.712
+    },
+    "quickness": {
+        "response_bias": 0.722
+    },
+    "introspection": {
+        "response_bias": 0.417,
+        "emotional_bias": 0.4
+    },
+    "creativity": {
+        "response_bias": 0.742
+    },
+    "imagination": {
+        "response_bias": 0.551,
+        "emotional_bias": 0.449
+    },
+    "depth": {
+        "response_bias": 0.629
+    }
+}

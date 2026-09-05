@@ -206,76 +206,91 @@ TEST_STIMULI = [
     "Tomorrow will change my life forever"
 ]
 
-EMOTIONS = [
-    "fear",
-    "anger",
-    "joy",
-    "sadness",
-    "trust",
-    "disgust",
-    "anticipation",
-    "surprise"
+CLUSTERS = [
+    "threat",
+    "reward",
+    "novelty",
+    "familiarity",
+    "urgency",
+    "social_relevance",
+    "discomfort",
+    "affinity"
 ]
 
 results = []
-emotion_stats = defaultdict(list)
+cluster_stats = defaultdict(list)
 
-print("\n=== MINDSIM EMOTION CALIBRATION ===\n")
+print("\n=== MINDSIM CALIBRATION RUN ===\n")
 
 for stimulus in TEST_STIMULI:
 
+    # completely fresh runtime
     engine = SimulationEngine()
+    engine.start()
 
-    # Run the complete architecture
-    engine.process_stimulus(stimulus)
+    try:
 
-    # Final target emotional state (before inertia)
-    emotion_map = dict(engine.emotion_layer.emotion_tanks)
+        engine.neuron_layer.process_stimulus(stimulus)
+        engine.neuron_layer.fireActivations()
 
-    results.append({
-        "stimulus": stimulus,
-        **emotion_map
-    })
+        engine.emotion_layer.process_targets()
 
-    print(f"\n{stimulus}")
+        full_map = dict(engine.neuron_layer.Full_activation_map)
 
-    for emotion in EMOTIONS:
+        results.append({
+            "stimulus": stimulus,
+            **full_map
+        })
 
-        value = emotion_map.get(emotion, 0.0)
+        print(f"\n{stimulus}")
 
-        emotion_stats[emotion].append(value)
+        for cluster, weights in full_map.items():
 
-        print(f"{emotion:<15}{value:.3f}")
+            value = full_map.get(cluster, 0.0)
 
+            cluster_stats[cluster].append(value)
 
-print("\n\n=== EMOTION STATISTICS ===\n")
+            print(
+                f"{cluster:<20}"
+                f"{value:.3f}"
+            )
 
+    finally:
 
-def percentile(values, p):
-    values = sorted(values)
-    idx = int((len(values) - 1) * p)
-    return values[idx]
+        engine.stop()
 
+print("\n\n=== CLUSTER STATISTICS ===\n")
 
-for emotion in EMOTIONS:
+for cluster in CLUSTERS:
 
-    values = emotion_stats[emotion]
+    values = cluster_stats[cluster]
 
-    print(f"\n{emotion.upper()}")
+    values_sorted = sorted(values)
+
+    percentile_95_index = int(len(values_sorted) * 0.95)
+    percentile_95_index = min(
+        percentile_95_index,
+        len(values_sorted) - 1
+    )
+
+    p95 = values_sorted[percentile_95_index]
+
+    print(f"\n{cluster.upper()}")
 
     print(f"min   : {min(values):.3f}")
-    print(f"5%    : {percentile(values, 0.05):.3f}")
-    print(f"25%   : {percentile(values, 0.25):.3f}")
-    print(f"50%   : {percentile(values, 0.50):.3f}")
-    print(f"75%   : {percentile(values, 0.75):.3f}")
-    print(f"95%   : {percentile(values, 0.95):.3f}")
-    print(f"max   : {max(values):.3f}")
     print(f"mean  : {mean(values):.3f}")
+    print(f"max   : {max(values):.3f}")
+    print(f"95%   : {p95:.3f}")
 
+print("\n\n=== RAW RESULTS JSON ===\n")
 
-print("\n\n=== SAVING RESULTS ===\n")
+with open("mindsim_full_calibration_results2.json", "w") as file:
+    json.dump(
+        results,
+        file,
+        indent=4
+    )
 
-with open("mindsim_emotion_calibration.json", "w") as file:
-    json.dump(results, file, indent=4)
-
-print("Saved -> mindsim_emotion_calibration.json")
+print(
+    "Saved -> mindsim_calibration_results.json"
+)

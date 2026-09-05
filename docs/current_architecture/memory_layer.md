@@ -224,3 +224,4 @@ retrieveMemories(...) -> {
   "associativelyActivated": [ { id, summaries, emotionMap, linkedVia: [{sourceMemoryId, linkType, strength}] }, ... ]
 }
 ```
+
