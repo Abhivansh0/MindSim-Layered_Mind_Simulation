@@ -36,10 +36,10 @@ class MemoryLayer:
     COMPOUND_BONUS           = 0.08
     COMPLEXITY_CAP           = 0.20
 
-    SEMANTIC_CANDIDATE_LIMIT  = 25
-    EMOTIONAL_CANDIDATE_LIMIT = 25
+    SEMANTIC_CANDIDATE_LIMIT  = 30
+    EMOTIONAL_CANDIDATE_LIMIT = 30
 
-    MINIMUM_RELEVANCE_THRESHOLD    = 0.35
+    SEMANTIC_CANDIDATE_THRESHOLD   = 0.5
     RETRIEVAL_ACTIVATION_THRESHOLD = 0.5
 
     LOW_MEDIUM_THRESHOLD  = 0.33
@@ -51,9 +51,7 @@ class MemoryLayer:
 
     EMOTION_CONTEXT_SIMILARITY_THRESHOLD = 0.85
 
-    SEMANTIC_LINK_WEIGHT = 0.5
-    TEMPORAL_LINK_WEIGHT = 0.5
-    EMOTIONAL_LINK_WEIGHT = 0.5
+    SPREAD_ACTIVATION_BUDGET = 1.0
 
     TEMPORAL_HALF_LIFE = 30
     MINIMUM_TEMPORAL_LINK_STRENGTH = 0.1
@@ -79,25 +77,14 @@ class MemoryLayer:
 
         self.chromaClient = chromadb.HttpClient(host="localhost", port=8000)
 
-        self.activeCollection   = self.chromaClient.get_or_create_collection(
-            name="mindsim_active",
-            metadata={"hnsw:space": "cosine"}
-        )
-        self.dormantCollection  = self.chromaClient.get_or_create_collection(
-            name="mindsim_dormant",
-            metadata={"hnsw:space": "cosine"}
-        )
-        self.archivedCollection = self.chromaClient.get_or_create_collection(
-            name="mindsim_archived",
+        self.collection = self.chromaClient.get_or_create_collection(
+            name="mindsim_memories",
             metadata={"hnsw:space": "cosine"}
         )
 
-        print(
-            f"ChromaDB Ready | "
-            f"Active: {self.activeCollection.count()} | "
-            f"Dormant: {self.dormantCollection.count()} | "
-            f"Archived: {self.archivedCollection.count()}"
-        )
+        self.contextBoxes: Dict[str, List[str]] = self.loadContextBoxes()
+
+        print(f"ChromaDB Ready | Memories: {self.collection.count()} | Emotion boxes: {len(self.contextBoxes)}")
 
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -127,7 +114,7 @@ class MemoryLayer:
             emotionContext=emotionContext,
         )
 
-        self.activeCollection.add(
+        self.collection.add(
             ids=[memory.id],
             embeddings=[memory.stimulusVector],
             metadatas=[{
@@ -146,6 +133,7 @@ class MemoryLayer:
         )
 
         self.establishLinksForNewMemory(memory)
+        self.registerMemoryInContextBox(memory.id, memory.emotionContext)
 
         print(
             f"Memory stored | "
@@ -161,7 +149,7 @@ class MemoryLayer:
         temporalNeighbors  = self.getTemporalCandidates(memory.createdAt, excludeId=memory.id)
         semanticNeighbors  = self.getSemanticLinkCandidates(memory.id, memory.stimulusVector)
         emotionalNeighbors = self.getEmotionalCandidates(memory.emotionMap)
-        emotionalNeighbors.pop(memory.id, None)  
+        emotionalNeighbors.pop(memory.id, None)   # a memory always matches its own box perfectly — exclude that trivial hit
 
         self.writeLinkPair(memory.id, temporalNeighbors, "temporalLinks")
         self.writeLinkPair(memory.id, semanticNeighbors, "semanticLinks")
@@ -172,23 +160,23 @@ class MemoryLayer:
         if not neighbors:
             return
 
-        newMemoryMetadata, newMemoryCollection = self.fetchMemoryById(newMemoryId)
+        newMemoryMetadata = self.fetchMemoryById(newMemoryId)
         newMemoryLinks = json.loads(newMemoryMetadata[fieldName])
 
         for neighborId, strength in neighbors.items():
             newMemoryLinks[neighborId] = strength
 
-            neighborMetadata, neighborCollection = self.fetchMemoryById(neighborId)
+            neighborMetadata = self.fetchMemoryById(neighborId)
             if neighborMetadata is None:
                 continue
             neighborLinks = json.loads(neighborMetadata[fieldName])
-            neighborLinks[newMemoryId] = strength  
-            self.getCollectionByName(neighborCollection).update(
+            neighborLinks[newMemoryId] = strength   # undirected — write the same strength on the other side too
+            self.collection.update(
                 ids=[neighborId],
                 metadatas=[{**neighborMetadata, fieldName: json.dumps(neighborLinks)}]
             )
 
-        self.getCollectionByName(newMemoryCollection).update(
+        self.collection.update(
             ids=[newMemoryId],
             metadatas=[{**newMemoryMetadata, fieldName: json.dumps(newMemoryLinks)}]
         )
@@ -250,20 +238,10 @@ class MemoryLayer:
         )
 
 
-    def getCollectionByName(self, collectionName: str):
-        if collectionName == "mindsim_active":
-            return self.activeCollection
-        elif collectionName == "mindsim_dormant":
-            return self.dormantCollection
-        elif collectionName == "mindsim_archived":
-            return self.archivedCollection
-
-
     def fetchMemoryById(self, memoryId: str):
-        for collection in [self.activeCollection, self.dormantCollection, self.archivedCollection]:
-            result = collection.get(ids=[memoryId])
-            if result["ids"]:
-                return result["metadatas"][0], collection.name
+        result = self.collection.get(ids=[memoryId])
+        if result["ids"]:
+            return result["metadatas"][0]
         return None
 
 
@@ -274,26 +252,26 @@ class MemoryLayer:
     def getSemanticCandidates(self, stimulusVector) -> Dict[str, dict]:
         candidates = {}
 
-        for collection in [self.activeCollection, self.dormantCollection, self.archivedCollection]:
-            if collection.count() == 0:
+        if self.collection.count() == 0:
+            return candidates
+
+        results = self.collection.query(
+            query_embeddings=[stimulusVector],
+            n_results=min(self.SEMANTIC_CANDIDATE_LIMIT, self.collection.count())
+        )
+
+        ids       = results["ids"][0]
+        metadatas = results["metadatas"][0]
+        distances = results["distances"][0]
+
+        for id_, metadata, distance in zip(ids, metadatas, distances):
+            similarity = 1 - distance
+            if similarity < self.SEMANTIC_CANDIDATE_THRESHOLD:
                 continue
-
-            results = collection.query(
-                query_embeddings=[stimulusVector],
-                n_results=min(self.SEMANTIC_CANDIDATE_LIMIT, collection.count())
-            )
-
-            ids       = results["ids"][0]
-            metadatas = results["metadatas"][0]
-            distances = results["distances"][0]
-
-            for id_, metadata, distance in zip(ids, metadatas, distances):
-                similarity = 1 - distance
-                candidates[id_] = {
-                    "memory":            self.memoryFromMetadata(id_, metadata),
-                    "collectionName":   collection.name,
-                    "semanticRelevance": similarity,
-                }
+            candidates[id_] = {
+                "memory":            self.memoryFromMetadata(id_, metadata),
+                "semanticRelevance": similarity,
+            }
 
         return candidates
 
@@ -305,22 +283,24 @@ class MemoryLayer:
     def getSemanticLinkCandidates(self, memoryId: str, stimulusVector: List[float]) -> Dict[str, float]:
         candidates: Dict[str, float] = {}
 
-        for collection in [self.activeCollection, self.dormantCollection, self.archivedCollection]:
-            if collection.count() == 0:
+        if self.collection.count() == 0:
+            return candidates
+
+        results = self.collection.query(
+            query_embeddings=[stimulusVector],
+            n_results=min(self.SEMANTIC_CANDIDATE_LIMIT, self.collection.count())
+        )
+
+        ids       = results["ids"][0]
+        distances = results["distances"][0]
+
+        for id_, distance in zip(ids, distances):
+            if id_ == memoryId:
                 continue
-
-            results = collection.query(
-                query_embeddings=[stimulusVector],
-                n_results=min(self.SEMANTIC_CANDIDATE_LIMIT, collection.count())
-            )
-
-            ids       = results["ids"][0]
-            distances = results["distances"][0]
-
-            for id_, distance in zip(ids, distances):
-                if id_ == memoryId:
-                    continue
-                candidates[id_] = 1 - distance
+            similarity = 1 - distance
+            if similarity < self.SEMANTIC_CANDIDATE_THRESHOLD:
+                continue
+            candidates[id_] = similarity
 
         return candidates
 
@@ -334,28 +314,25 @@ class MemoryLayer:
         }
 
 
-    def calculateTemporalSpread(self, memory: Memory, activeChunkIds: set) -> float:
-        total = sum(
-            strength for neighborId, strength in memory.temporalLinks.items()
+    def calculateTemporalSpread(self, memory: Memory, activeChunkIds: set, perSourceWeight: float) -> float:
+        return sum(
+            perSourceWeight * strength for neighborId, strength in memory.temporalLinks.items()
             if neighborId in activeChunkIds
         )
-        return self.TEMPORAL_LINK_WEIGHT * total
 
 
-    def calculateSemanticSpread(self, memory: Memory, activeChunkIds: set) -> float:
-        total = sum(
-            strength for neighborId, strength in memory.semanticLinks.items()
+    def calculateSemanticSpread(self, memory: Memory, activeChunkIds: set, perSourceWeight: float) -> float:
+        return sum(
+            perSourceWeight * strength for neighborId, strength in memory.semanticLinks.items()
             if neighborId in activeChunkIds
         )
-        return self.SEMANTIC_LINK_WEIGHT * total
 
 
-    def calculateEmotionalSpread(self, memory: Memory, activeChunkIds: set) -> float:
-        total = sum(
-            strength for neighborId, strength in memory.emotionalLinks.items()
+    def calculateEmotionalSpread(self, memory: Memory, activeChunkIds: set, perSourceWeight: float) -> float:
+        return sum(
+            perSourceWeight * strength for neighborId, strength in memory.emotionalLinks.items()
             if neighborId in activeChunkIds
         )
-        return self.EMOTIONAL_LINK_WEIGHT * total
 
 
 
@@ -386,18 +363,32 @@ class MemoryLayer:
         return dot / (magnitudeA * magnitudeB)
 
 
-    def getContextBoxes(self) -> Dict[str, List[str]]:
+    def loadContextBoxes(self) -> Dict[str, List[str]]:
         boxes: Dict[str, List[str]] = {}
-        for collection in [self.activeCollection, self.dormantCollection, self.archivedCollection]:
-            if collection.count() == 0:
+        if self.collection.count() == 0:
+            return boxes
+        records = self.collection.get()
+        for memoryId, metadata in zip(records["ids"], records["metadatas"]):
+            context = metadata.get("emotionContext", "")
+            if not context:
                 continue
-            records = collection.get()
-            for memoryId, metadata in zip(records["ids"], records["metadatas"]):
-                context = metadata.get("emotionContext", "")
-                if not context:
-                    continue
-                boxes.setdefault(context, []).append(memoryId)
+            boxes.setdefault(context, []).append(memoryId)
         return boxes
+
+
+    def registerMemoryInContextBox(self, memoryId: str, context: str):
+        if not context:
+            return
+        self.contextBoxes.setdefault(context, []).append(memoryId)
+
+
+    def getPatternInfo(self, context: str) -> dict:
+        memberIds = self.contextBoxes.get(context, [])
+        return {
+            "signature": context,
+            "memoryIds": list(memberIds),
+            "count": len(memberIds),
+        }
 
 
     def getEmotionalCandidates(self, currentEmotionMap: Dict[str, float]) -> Dict[str, float]:
@@ -405,7 +396,7 @@ class MemoryLayer:
         stimulusVector = self.contextToVector(stimulusContext)
 
         candidates: Dict[str, float] = {}
-        for context, memberIds in self.getContextBoxes().items():
+        for context, memberIds in self.contextBoxes.items():
             similarity = self.cosineSimilarity(stimulusVector, self.contextToVector(context))
             if similarity < self.EMOTION_CONTEXT_SIMILARITY_THRESHOLD:
                 continue
@@ -430,26 +421,25 @@ class MemoryLayer:
         windowSeconds = self.temporalWindowMinutes * 60
 
         candidates: Dict[str, float] = {}
-        for collection in [self.activeCollection, self.dormantCollection, self.archivedCollection]:
-            if collection.count() == 0:
+        if self.collection.count() == 0:
+            return candidates
+
+        results = self.collection.get(
+            where={
+                "$and": [
+                    {"createdAtEpoch": {"$gte": referenceEpoch - windowSeconds}},
+                    {"createdAtEpoch": {"$lte": referenceEpoch + windowSeconds}},
+                ]
+            }
+        )
+
+        for memoryId, metadata in zip(results["ids"], results["metadatas"]):
+            if memoryId == excludeId:
                 continue
-
-            results = collection.get(
-                where={
-                    "$and": [
-                        {"createdAtEpoch": {"$gte": referenceEpoch - windowSeconds}},
-                        {"createdAtEpoch": {"$lte": referenceEpoch + windowSeconds}},
-                    ]
-                }
-            )
-
-            for memoryId, metadata in zip(results["ids"], results["metadatas"]):
-                if memoryId == excludeId:
-                    continue
-                deltaMinutes = abs(referenceEpoch - metadata["createdAtEpoch"]) / 60
-                strength = self.calculateTemporalLinkStrength(deltaMinutes)
-                if strength >= self.MINIMUM_TEMPORAL_LINK_STRENGTH:
-                    candidates[memoryId] = strength
+            deltaMinutes = abs(referenceEpoch - metadata["createdAtEpoch"]) / 60
+            strength = self.calculateTemporalLinkStrength(deltaMinutes)
+            if strength >= self.MINIMUM_TEMPORAL_LINK_STRENGTH:
+                candidates[memoryId] = strength
 
         return candidates
 
@@ -460,7 +450,6 @@ class MemoryLayer:
         for memoryId, info in semanticCandidates.items():
             merged[memoryId] = {
                 "memory":              info["memory"],
-                "collectionName":     info["collectionName"],
                 "semanticRelevance":  info["semanticRelevance"],
                 "emotionalRelevance": 0.0,
             }
@@ -469,13 +458,11 @@ class MemoryLayer:
             if memoryId in merged:
                 merged[memoryId]["emotionalRelevance"] = linkStrength
             else:
-                fetched = self.fetchMemoryById(memoryId)
-                if fetched is None:
+                metadata = self.fetchMemoryById(memoryId)
+                if metadata is None:
                     continue
-                metadata, collectionName = fetched
                 merged[memoryId] = {
                     "memory":              self.memoryFromMetadata(memoryId, metadata),
-                    "collectionName":     collectionName,
                     "semanticRelevance":  0.0,
                     "emotionalRelevance": linkStrength,
                 }
@@ -489,10 +476,6 @@ class MemoryLayer:
 
     def calculateUnifiedRelevance(self, semanticRelevance: float, emotionalRelevance: float) -> float:
         return semanticRelevance + emotionalRelevance - (semanticRelevance * emotionalRelevance)
-
-
-    def isRelevant(self, unifiedRelevance: float) -> bool:
-        return unifiedRelevance >= self.MINIMUM_RELEVANCE_THRESHOLD
 
 
     # ═════════════════════════════════════════════════════════════════════════
@@ -551,23 +534,26 @@ class MemoryLayer:
 
         merged = self.mergeCandidates(semanticCandidates, emotionalCandidates)
 
-       
+        # snapshot BEFORE this round's own results exist — a candidate must never spread to/from
+        # something only just recalled in this same pass, only from genuinely prior activity
         self.pruneActiveChunks(currentTime)
         activeChunkIds = set(self.activeChunks.keys())
+
+        perSourceWeight = (
+            self.SPREAD_ACTIVATION_BUDGET / len(activeChunkIds) if activeChunkIds else 0.0
+        )
 
         successes = []
         for memoryId, candidate in merged.items():
             unifiedRelevance = self.calculateUnifiedRelevance(
                 candidate["semanticRelevance"], candidate["emotionalRelevance"]
             )
-            if not self.isRelevant(unifiedRelevance):
-                continue
 
             memory = candidate["memory"]
             bla = self.calculateBla(memory, currentTime)
-            spreadTemporal = self.calculateTemporalSpread(memory, activeChunkIds)
-            spreadSemantic = self.calculateSemanticSpread(memory, activeChunkIds)
-            spreadEmotional = self.calculateEmotionalSpread(memory, activeChunkIds)
+            spreadTemporal = self.calculateTemporalSpread(memory, activeChunkIds, perSourceWeight)
+            spreadSemantic = self.calculateSemanticSpread(memory, activeChunkIds, perSourceWeight)
+            spreadEmotional = self.calculateEmotionalSpread(memory, activeChunkIds, perSourceWeight)
 
             activation = self.calculateRetrievalActivation(
                 unifiedRelevance, bla, spreadTemporal, spreadSemantic, spreadEmotional
@@ -586,6 +572,7 @@ class MemoryLayer:
         recalledIds = {memory["id"] for memory in successes}
         associative = self.expandViaMemoryLinks(recalledIds, currentTime)
 
+        # this round's results become part of "what's active" for the NEXT retrieval's spread activation
         for memoryId in recalledIds | {memory["id"] for memory in associative}:
             self.activeChunks[memoryId] = currentTime
 
@@ -596,10 +583,13 @@ class MemoryLayer:
 
 
     def expandViaMemoryLinks(self, recalledIds: set, currentTime: datetime) -> List[dict]:
+        # one hop only, from whichever memories actually made the final pool — never from a rejected candidate,
+        # and never cascading further out from whatever gets pulled in here. Reads each source's permanently
+        # stored links directly instead of recomputing anything live.
         linkedVia: Dict[str, List[dict]] = {}
 
         for sourceId in recalledIds:
-            sourceMetadata, _ = self.fetchMemoryById(sourceId)
+            sourceMetadata = self.fetchMemoryById(sourceId)
             sourceMemory = self.memoryFromMetadata(sourceId, sourceMetadata)
 
             for linkType, neighbors in [
@@ -616,12 +606,12 @@ class MemoryLayer:
 
         associativeOutput = []
         for neighborId, links in linkedVia.items():
-            metadata, collectionName = self.fetchMemoryById(neighborId)
+            metadata = self.fetchMemoryById(neighborId)
             memory = self.memoryFromMetadata(neighborId, metadata)
 
             # rode in via association, but it still genuinely came to mind — counts as a real recall
             memory.recallHistory.append(currentTime)
-            self.persistRecall(memory, collectionName)
+            self.persistRecall(memory)
 
             associativeOutput.append({
                 "id":               neighborId,
@@ -638,9 +628,8 @@ class MemoryLayer:
     # RECALL UPDATE
     # ═════════════════════════════════════════════════════════════════════════
 
-    def persistRecall(self, memory: Memory, collectionName: str):
-        collection = self.getCollectionByName(collectionName)
-        collection.update(
+    def persistRecall(self, memory: Memory):
+        self.collection.update(
             ids=[memory.id],
             metadatas=[{
                 "stimulusSummary":         memory.stimulusSummary,
@@ -661,7 +650,7 @@ class MemoryLayer:
     def recordSuccessfulRecall(self, candidate: dict, memoryId: str, currentTime: datetime):
         memory = candidate["memory"]
         memory.recallHistory.append(currentTime)
-        self.persistRecall(memory, candidate["collectionName"])
+        self.persistRecall(memory)
 
 
     def formatOutput(
