@@ -32,7 +32,6 @@ class MindState:
         default_factory=lambda:{
             "base": create_emotion_state(),
             "compounds": {},
-            "combined": {},
             "trends":{},
             "dominant": None
         })
