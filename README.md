@@ -363,7 +363,7 @@ Rather than hiding design choices inside implementation details, major architect
 - [`ADR-010 — Pattern Strength Nudge System`](docs/ADR/ADR-010-pattern-strength-nudge-system.md)
 - [`ADR-011 — Descriptor DNA: Static vs Live Activation`](docs/ADR/ADR-011-descriptor-dna-static-vs-live-activation.md)
 - [`ADR-012 — Descriptor Family Bias Distribution`](docs/ADR/ADR-012-descriptor-family-bias-distribution.md)
-- [`ADR-013 — Emotion-Weighted-Memory-Decay.md`](docs/ADR-013-Emotion-Weighted-Memory-Decay.md)
+- [`ADR-013 — Emotion-Weighted-Memory-Decay`](docs/ADR/ADR-013-Emotion-Weighted-Memory-Decay.md)
 
 ---
 
