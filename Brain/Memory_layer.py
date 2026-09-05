@@ -565,8 +565,8 @@ class MemoryLayer:
             self.recordSuccessfulRecall(candidate, memoryId, currentTime)
 
             successes.append(self.formatOutput(
-                memoryId, candidate, unifiedRelevance, bla,
-                spreadTemporal, spreadSemantic, spreadEmotional, activation, latency
+                memoryId, candidate, candidate["semanticRelevance"], candidate["emotionalRelevance"],
+                bla, spreadTemporal, spreadSemantic, spreadEmotional, activation, latency
             ))
 
         recalledIds = {memory["id"] for memory in successes}
@@ -576,10 +576,17 @@ class MemoryLayer:
         for memoryId in recalledIds | {memory["id"] for memory in associative}:
             self.activeChunks[memoryId] = currentTime
 
-        return {
+        result = {
             "recalled": successes,
             "associativelyActivated": associative,
         }
+
+        self.mindState.working_memory = result
+        self.mindState.activation_map = {
+            memory["id"]: memory["retrievalActivation"] for memory in successes
+        }
+
+        return result
 
 
     def expandViaMemoryLinks(self, recalledIds: set, currentTime: datetime) -> List[dict]:
