@@ -1,4 +1,4 @@
-# ADR-001: Emotion-Weighted Memory Decay
+# ADR-013: Emotion-Weighted Memory Decay
 **Status:** Accepted
 
 ---
